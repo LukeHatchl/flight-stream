@@ -1,0 +1,8 @@
+flightstream:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('FLIGHTSTREAM_DATA_DIR', '../data') }}/warehouse.duckdb"
+      extensions:
+        - spatial

@@ -1,0 +1,37 @@
+# credentials — never commit
+credentials.json
+*.env
+.env
+
+# local data (bronze snapshots + warehouse)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/.user.yml
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/.terraform.lock.hcl
+infra/terraform.tfvars
+
+# Airflow
+airflow/logs/
+
+# Streamlit
+.streamlit/
+
+# macOS
+.DS_Store
