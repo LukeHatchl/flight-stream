@@ -4,17 +4,14 @@
 
 ---
 
-## 1. What this is (the one-paragraph pitch)
+## 1. What this is
 
-A production-style data platform that continuously ingests live aircraft positions from the OpenSky Network, lands raw snapshots in object storage, transforms and models them with dbt, runs geospatial analytics in a warehouse, orchestrates the whole batch cycle with Airflow, provisions cloud infrastructure with Terraform, and serves a live map + analytics dashboard. It's a full modern-data-stack project built on a genuinely live, moving, geospatial dataset.
-
-**Why this one:** it exercises every skill you're adding to your resume (dbt, Terraform, a warehouse, orchestration) while leaning on your existing edge (geospatial, AWS, Spark-style batch thinking). "Planes updating on a live map, with a pipeline behind it" also demos in ten seconds in an interview.
-
+A production-style data platform that continuously ingests live aircraft positions from the OpenSky Network, lands raw snapshots in object storage, transforms and models them with dbt, runs geospatial analytics in a warehouse, orchestrates the whole batch cycle with Airflow, provisions cloud infrastructure with Terraform, and serves a live map + analytics dashboard.
 ---
 
 ## 2. Architecture at a glance
 
-Two cooperating pieces, which is the honest real-world pattern — a near-real-time collector plus a scheduled transform pipeline:
+Two cooperating pieces, a near-real-time collector plus a scheduled transform pipeline:
 
 ```
                           ┌─────────────────────────────────────┐
@@ -40,8 +37,7 @@ Two cooperating pieces, which is the honest real-world pattern — a near-real-t
 
 - **Collector** runs continuously (a small Python service) so ingestion feels live. Keeping it separate from Airflow is deliberate and defensible: Airflow orchestrates *batch* work well, but is the wrong tool for sub-minute polling.
 - **Airflow** orchestrates the transform cycle — load, dbt build, tests, mart refresh — every 10 minutes. This is where Airflow genuinely earns its place in the story.
-- **Medallion layers:** bronze (raw), silver (cleaned/typed), gold (analytics marts). Naming your layers this way signals you know the pattern.
-
+- **Medallion layers:** bronze (raw), silver (cleaned/typed), gold (analytics marts). 
 ---
 
 ## 3. Tech stack (and why each is here)
