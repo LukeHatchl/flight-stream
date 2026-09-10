@@ -7,6 +7,7 @@
 ## 1. What this is
 
 A production-style data platform that continuously ingests live aircraft positions from the OpenSky Network, lands raw snapshots in object storage, transforms and models them with dbt, runs geospatial analytics in a warehouse, orchestrates the whole batch cycle with Airflow, provisions cloud infrastructure with Terraform, and serves a live map + analytics dashboard.
+
 ---
 
 ## 2. Architecture at a glance
@@ -40,7 +41,7 @@ Two cooperating pieces, a near-real-time collector plus a scheduled transform pi
 - **Medallion layers:** bronze (raw), silver (cleaned/typed), gold (analytics marts). 
 ---
 
-## 3. Tech stack (and why each is here)
+## 3. Tech stack
 
 | Layer | Tool | Why / resume payoff |
 |---|---|---|
@@ -99,8 +100,6 @@ Widen to the whole Mid-Atlantic or CONUS once it works — just watch the call b
 - `mart_airport_proximity` — **geospatial join**: aircraft within N km of each airport, low-altitude + descending → inferred arrivals; climbing → inferred departures. Uses DuckDB's `spatial` extension (`ST_Distance`, `ST_Point`).
 - `mart_traffic_heatmap` — position density grid over the box (busiest corridors).
 - `mart_flights_by_country` — origin-country breakdown over time.
-
-The geospatial marts are your differentiator — most portfolio pipelines stop at "group by and count." Point-in-polygon and distance joins are exactly the ArcGIS/OSM instincts you already have, now expressed in the modern stack.
 
 ---
 
