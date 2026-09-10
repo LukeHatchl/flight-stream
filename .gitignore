@@ -3,6 +3,9 @@ credentials.json
 *.env
 .env
 
+# project spec — not part of the shipped project
+adsb-pipeline-spec.md
+
 # local data (bronze snapshots + warehouse)
 data/
 
