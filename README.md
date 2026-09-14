@@ -105,13 +105,38 @@ Collector behavior is controlled by environment variables set in `docker-compose
 | `FLIGHTSTREAM_CREDENTIALS_PATH` | `/opt/flightstream/credentials.json` | Path to the OpenSky OAuth2 credentials file |
 | `FLIGHTSTREAM_DATA_DIR` | `/opt/flightstream/data` | Base directory bronze snapshots are written under |
 
-### 5. Run dbt locally (optional)
+### 5. Run dbt
+
+dbt runs locally against the same `data/` directory the collector writes to — no separate service needed. Let the collector accumulate at least one snapshot first (see step 3), then:
 
 ```bash
 cd dbt
 pip install dbt-duckdb
-dbt build --profiles-dir .
+FLIGHTSTREAM_DATA_DIR="$(cd ../data && pwd)" dbt build --profiles-dir .
 ```
+
+`FLIGHTSTREAM_DATA_DIR` must be an absolute path here — dbt models read bronze Parquet directly off disk via DuckDB's `read_parquet()`, and a relative path resolves against dbt's internal run directory, not your shell's cwd.
+
+This builds, in order:
+- **`stg_states`** (view) — reads every file under `data/bronze/**/*.parquet`, types and cleans the columns, drops on-ground/null-position rows, and de-dupes.
+- **`airports`** (seed) — 1,772 US airports with an ICAO code, sourced from OurAirports and filtered down from their full ~86k-row global list (see `dbt/seeds/airports.csv`).
+- **`fct_active_flights`** (table) — every aircraft from the single most recent poll, i.e. what's airborne in the bbox right now.
+
+The first `dbt build` on a fresh machine takes ~60s one-time to download DuckDB's `spatial` extension (declared in `dbt/profiles.yml`); every run after that finishes in under a second for this data volume.
+
+To poke at the results directly instead of trusting the `dbt build` output:
+
+```bash
+cd dbt
+FLIGHTSTREAM_DATA_DIR="$(cd ../data && pwd)" python3 -c "
+import duckdb
+con = duckdb.connect('../data/warehouse.duckdb')
+print(con.execute('select count(*) from main.stg_states').fetchall())
+print(con.execute('select icao24, callsign, latitude, longitude, velocity_knots, heading, snapshot_ts from main.fct_active_flights limit 5').fetchall())
+"
+```
+
+Or open it in the DuckDB CLI: `duckdb data/warehouse.duckdb` then `select * from fct_active_flights limit 10;`.
 
 ### 6. Stop / clean up
 
@@ -132,7 +157,7 @@ Avoid `docker compose down -v` unless you actually want to wipe the Airflow meta
 
 - [x] Phase 0 — Scaffold
 - [x] Phase 1 — Extractor MVP
-- [ ] Phase 2 — DuckDB + first dbt models
+- [x] Phase 2 — DuckDB + first dbt models
 - [ ] Phase 3 — Airflow orchestration
 - [ ] Phase 4 — Geospatial marts
 - [ ] Phase 5 — Terraform
