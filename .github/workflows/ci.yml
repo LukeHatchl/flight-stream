@@ -10,12 +10,19 @@ jobs:
   dbt-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install dbt
-        run: pip install dbt-duckdb
+      - name: Install dependencies
+        run: pip install dbt-duckdb pyarrow
+      - name: Generate a synthetic bronze snapshot
+        # data/ is gitignored — real bronze data only exists on a machine that has
+        # run the collector. CI needs something for stg_states' read_parquet() to
+        # find, so fabricate one snapshot instead of building against nothing.
+        run: python .github/scripts/make_ci_fixture.py
       - name: dbt build
         working-directory: dbt
+        env:
+          FLIGHTSTREAM_DATA_DIR: ${{ github.workspace }}/data
         run: dbt build --profiles-dir .
