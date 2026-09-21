@@ -138,7 +138,38 @@ print(con.execute('select icao24, callsign, latitude, longitude, velocity_knots,
 
 Or open it in the DuckDB CLI: `duckdb data/warehouse.duckdb` then `select * from fct_active_flights limit 10;`.
 
-### 6. Stop / clean up
+### 6. Airflow orchestration
+
+Once the collector has some bronze data, Airflow can run the same dbt work automatically instead of you invoking it by hand. The DAG (`airflow/dags/flightstream_dag.py`, id `flightstream_pipeline`) runs every 10 minutes:
+
+1. **`check_new_bronze_data`** — fails fast with a clear message if `data/bronze/` has no Parquet files at all (rather than letting dbt fail on it with a cryptic DuckDB error).
+2. **`dbt_run_staging`** — `dbt run --select staging` (rebuilds `stg_states`).
+3. **`dbt_test`** — `dbt test`. Currently a no-op (0 tests defined yet — that's Phase 7), but it's already wired in as a gate: once real tests exist, a failure here blocks the next step.
+4. **`dbt_run_marts`** — `dbt run --select marts` (refreshes `fct_active_flights`), only runs if the test gate passes.
+
+The Airflow image is custom-built (`airflow/Dockerfile`) on top of `apache/airflow:2.9.3` with `dbt-duckdb` installed (see `airflow/requirements.txt`) — the stock image doesn't ship dbt. If you change that Dockerfile or requirements file, rebuild before starting:
+
+```bash
+docker compose build airflow-init airflow-webserver airflow-scheduler
+docker compose up -d
+```
+
+DAGs start **paused** (`AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION`), so the schedule won't fire until you unpause it — either toggle it on in the UI (http://localhost:8080) or:
+
+```bash
+docker compose exec airflow-webserver airflow dags unpause flightstream_pipeline
+```
+
+To test it immediately instead of waiting for the next 10-minute mark:
+
+```bash
+docker compose exec airflow-webserver airflow dags trigger flightstream_pipeline
+docker compose exec airflow-webserver airflow dags list-runs -d flightstream_pipeline
+```
+
+The Airflow UI's Grid view for `flightstream_pipeline` is the easiest way to watch task-by-task status and read logs per task. Note the very first `dbt_run_staging` after a fresh `docker compose up --build` can take several minutes — each container has its own DuckDB extension cache, so the one-time `spatial` extension download (see step 5) happens again per container, not just per machine. Every run after that is fast.
+
+### 7. Stop / clean up
 
 ```bash
 docker compose stop        # pause containers, keep them for a fast restart
@@ -158,7 +189,7 @@ Avoid `docker compose down -v` unless you actually want to wipe the Airflow meta
 - [x] Phase 0 — Scaffold
 - [x] Phase 1 — Extractor MVP
 - [x] Phase 2 — DuckDB + first dbt models
-- [ ] Phase 3 — Airflow orchestration
+- [x] Phase 3 — Airflow orchestration
 - [ ] Phase 4 — Geospatial marts
 - [ ] Phase 5 — Terraform
 - [ ] Phase 6 — Dashboard
