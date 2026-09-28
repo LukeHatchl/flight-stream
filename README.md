@@ -120,9 +120,15 @@ FLIGHTSTREAM_DATA_DIR="$(cd ../data && pwd)" dbt build --profiles-dir .
 This builds, in order:
 - **`stg_states`** (view) — reads every file under `data/bronze/**/*.parquet`, types and cleans the columns, drops on-ground/null-position rows, and de-dupes.
 - **`airports`** (seed) — 1,772 US airports with an ICAO code, sourced from OurAirports and filtered down from their full ~86k-row global list (see `dbt/seeds/airports.csv`).
+- **`stg_airports`** (view) — typed cleanup of the seed.
 - **`fct_active_flights`** (table) — every aircraft from the single most recent poll, i.e. what's airborne in the bbox right now.
+- **`fct_flight_tracks`** (table) — reconstructed per-aircraft flight paths (a `LINESTRING` geometry per continuous session — a >10 minute gap between two observations of the same aircraft starts a new track rather than drawing a straight line across the gap).
+- **`mart_airport_proximity`** (table) — every active flight within `airport_proximity_km` (default 50, see `dbt_project.yml`) of a US airport, with an `inferred_phase` (`arrival` / `departure` / null) from altitude + vertical rate.
+- **`mart_traffic_heatmap`** (table) — position density grid (~0.05°/~5.5km cells) over the whole collected history, for spotting busiest corridors.
 
 The first `dbt build` on a fresh machine takes ~60s one-time to download DuckDB's `spatial` extension (declared in `dbt/profiles.yml`); every run after that finishes in under a second for this data volume.
+
+> **Gotcha:** DuckDB spatial's `ST_Point()` combined with `ST_Distance_Sphere()`/`ST_MakeLine()` takes **`(latitude, longitude)`** here, not the OGC-standard `(longitude, latitude)` order most GIS tooling uses. Verified against known real distances (BWI↔DCA, IAD↔DCA) — swapping the order silently produces distances that are wrong but still look plausible. Every model that builds a point comments this; keep the convention if you add more.
 
 To poke at the results directly instead of trusting the `dbt build` output:
 
@@ -138,7 +144,37 @@ print(con.execute('select icao24, callsign, latitude, longitude, velocity_knots,
 
 Or open it in the DuckDB CLI: `duckdb data/warehouse.duckdb` then `select * from fct_active_flights limit 10;`.
 
-### 6. Airflow orchestration
+### 6. Query the geospatial marts
+
+The differentiator query — planes within 15km of BWI, descending:
+
+```bash
+cd dbt
+FLIGHTSTREAM_DATA_DIR="$(cd ../data && pwd)" python3 -c "
+import duckdb
+con = duckdb.connect('../data/warehouse.duckdb')
+rows = con.execute('''
+    select icao24, callsign, distance_km, baro_altitude, vertical_rate, inferred_phase, snapshot_ts
+    from mart_airport_proximity
+    where airport_icao_code = 'KBWI' and distance_km <= 15 and vertical_rate < 0
+    order by distance_km
+''').fetchall()
+for r in rows:
+    print(r)
+"
+```
+
+To see a reconstructed flight path as WKT (paste into e.g. [wktmap.com](http://wktmap.com) or any WKT viewer to visualize it):
+
+```bash
+FLIGHTSTREAM_DATA_DIR="$(cd ../data && pwd)" python3 -c "
+import duckdb
+con = duckdb.connect('../data/warehouse.duckdb')
+print(con.execute('select track_id, callsign, num_points, ST_AsText(flight_path) from fct_flight_tracks order by num_points desc limit 1').fetchall())
+"
+```
+
+### 7. Airflow orchestration
 
 Once the collector has some bronze data, Airflow can run the same dbt work automatically instead of you invoking it by hand. The DAG (`airflow/dags/flightstream_dag.py`, id `flightstream_pipeline`) runs every 10 minutes:
 
@@ -169,7 +205,7 @@ docker compose exec airflow-webserver airflow dags list-runs -d flightstream_pip
 
 The Airflow UI's Grid view for `flightstream_pipeline` is the easiest way to watch task-by-task status and read logs per task. Note the very first `dbt_run_staging` after a fresh `docker compose up --build` can take several minutes — each container has its own DuckDB extension cache, so the one-time `spatial` extension download (see step 5) happens again per container, not just per machine. Every run after that is fast.
 
-### 7. Stop / clean up
+### 8. Stop / clean up
 
 ```bash
 docker compose stop        # pause containers, keep them for a fast restart
@@ -181,8 +217,10 @@ Avoid `docker compose down -v` unless you actually want to wipe the Airflow meta
 ## Data model
 
 - **Bronze** — raw snapshots, one Parquet file per poll, partitioned `date=YYYY-MM-DD/hour=HH/`
-- **Silver** — `stg_states` (typed, de-duped), `dim_airports`, `dim_aircraft`
-- **Gold** — `fct_active_flights`, `fct_flight_tracks`, `mart_airport_proximity`, `mart_traffic_heatmap`, `mart_flights_by_country`
+- **Silver** — `stg_states` (typed, de-duped), `stg_airports`
+- **Gold** — `fct_active_flights`, `fct_flight_tracks`, `mart_airport_proximity`, `mart_traffic_heatmap`
+
+`dim_airports`/`dim_aircraft` (SCD-style dimensions) and `mart_flights_by_country` from the original spec were never built — `stg_airports` already covers what `dim_airports` would have, and the others weren't needed by any mart yet.
 
 ## Build phases
 
@@ -190,7 +228,7 @@ Avoid `docker compose down -v` unless you actually want to wipe the Airflow meta
 - [x] Phase 1 — Extractor MVP
 - [x] Phase 2 — DuckDB + first dbt models
 - [x] Phase 3 — Airflow orchestration
-- [ ] Phase 4 — Geospatial marts
+- [x] Phase 4 — Geospatial marts
 - [ ] Phase 5 — Terraform
 - [ ] Phase 6 — Dashboard
 - [ ] Phase 7 — Production polish
